@@ -158,3 +158,14 @@ TOKEN_ENCRYPTION_KEY = os.getenv("TOKEN_ENCRYPTION_KEY", "")
 K8S_REQUEST_TIMEOUT = int(os.getenv("K8S_REQUEST_TIMEOUT", "10"))
 
 CELERY_BROKER_URL = "redis://localhost:6379/0"
+
+CELERY_BEAT_SCHEDULE = {
+    "check-backup-schedules": {
+        "task": "core.tasks.check_backup_schedules",
+        "schedule": 60.0,
+    },
+    "cleanup-stale-backups": {
+        "task": "core.tasks.cleanup_stale_backups",
+        "schedule": 3600.0,
+    },
+}

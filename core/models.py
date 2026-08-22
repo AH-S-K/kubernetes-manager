@@ -91,3 +91,31 @@ class App(models.Model):
 
     def __str__(self):
         return f"{self.id} - {self.name}"
+    
+    
+class BackupStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    RUNNING = "running", "Running"
+    COMPLETED = "completed", "Completed"
+    FAILED = "failed", "Failed"
+
+class Backup(models.Model):
+    backup_id = models.CharField(max_length=64, unique=True, primary_key=True)
+    app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="backups")
+    source_path = models.CharField(max_length=512)
+    status = models.CharField(max_length=20, choices=BackupStatus.choices, default=BackupStatus.PENDING)
+    file_path = models.CharField(max_length=1024, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+class BackupSchedule(models.Model):
+    app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="backup_schedules")
+    source_path = models.CharField(max_length=512)
+    cron_minute = models.CharField(max_length=10, default="*")
+    cron_hour = models.CharField(max_length=10, default="*")
+    cron_day_of_month = models.CharField(max_length=10, default="*")
+    cron_month_of_year = models.CharField(max_length=10, default="*")
+    cron_day_of_week = models.CharField(max_length=10, default="*")
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)

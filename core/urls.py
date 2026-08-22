@@ -1,13 +1,8 @@
 from django.urls import path
 
 from .views import (
-    AppDetailView,
-    AppListCreateView,
-    ClusterListCreateView,
-    NamespaceDeleteView,
-    NamespaceListCreateView,
-    BackupView,
-    
+    AppDetailView, AppListCreateView, ClusterListCreateView,
+    NamespaceDeleteView, NamespaceListCreateView, BackupView, BackupDetailView,
 )
 
 urlpatterns = [
@@ -17,4 +12,5 @@ urlpatterns = [
     path("apps/", AppListCreateView.as_view()),
     path("apps/<int:pk>/", AppDetailView.as_view()),
     path("backup/", BackupView.as_view()),
+    path("backup/<str:backup_id>/", BackupDetailView.as_view()),
 ]

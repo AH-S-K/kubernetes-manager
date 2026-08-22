@@ -1,10 +1,14 @@
+import uuid
+import redis
+
 from django.db import connection
+from django.conf import settings
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .exceptions import ValidationError
-from .serializers import (
+from core.exceptions import ValidationError
+from core.serializers import (
     AppCreateSerializer,
     AppUpdateSerializer,
     ClusterCreateSerializer,
@@ -12,10 +16,11 @@ from .serializers import (
     NamespaceCreateSerializer,
     NamespaceReadSerializer,
 )
-from .services import apps as app_service
-from .services import clusters as cluster_service
-from .services import namespaces as namespace_service
-from .tasks import backup
+from core.services import apps as app_service
+from core.services import clusters as cluster_service
+from core.services import namespaces as namespace_service
+from core.tasks import execute_backup
+
 
 class ClusterListCreateView(APIView):
     def get(self, request):
@@ -146,14 +151,57 @@ class ReadyHealthView(APIView):
         return Response({"status": "ready"})
     
 
+redis_client = redis.Redis.from_url(settings.CELERY_BROKER_URL)
+
 class BackupView(APIView):
     def post(self, request):
-        task = backup.delay()
+        app_id = request.data.get("app_id")
+        source_path = request.data.get("source_path")
+        schedule = request.data.get("schedule")
 
-        return Response(
-            {
-                "message": "Backup task queued.",
-                "task_id": task.id,
-            },
-            status=status.HTTP_202_ACCEPTED,
+        if not app_id or not source_path:
+            raise ValidationError("app_id and source_path are required.")
+
+        try:
+            app = App.objects.get(id=app_id)
+        except App.DoesNotExist:
+            raise NotFoundError("App not found.", {"app_id": app_id})
+
+        backup_id = f"bkp_{uuid.uuid4().hex[:6]}"
+        Backup.objects.create(
+            backup_id=backup_id, app=app,
+            source_path=source_path, status="pending"
         )
+        execute_backup.delay(backup_id)
+
+        if schedule:
+            parts = schedule.split()
+            if len(parts) != 5:
+                raise ValidationError("Invalid cron expression. Expected 5 fields.")
+            BackupSchedule.objects.create(
+                app=app, source_path=source_path,
+                cron_minute=parts[0], cron_hour=parts[1],
+                cron_day_of_month=parts[2], cron_month_of_year=parts[3],
+                cron_day_of_week=parts[4]
+            )
+
+        return Response({"backup_id": backup_id, "status": "pending"}, status=status.HTTP_202_ACCEPTED)
+
+    def get(self, request):
+        app_id = request.query_params.get("app_id")
+        if not app_id:
+            raise ValidationError("app_id query parameter is required.")
+        backups = Backup.objects.filter(app_id=app_id).order_by("-created_at")
+        return Response([{"backup_id": b.backup_id, "status": b.status} for b in backups])
+
+class BackupDetailView(APIView):
+    def get(self, request, backup_id):
+        try:
+            backup = Backup.objects.get(backup_id=backup_id)
+        except Backup.DoesNotExist:
+            raise NotFoundError("Backup not found.", {"backup_id": backup_id})
+        return Response({
+            "backup_id": backup.backup_id,
+            "app_id": backup.app_id,
+            "status": backup.status
+        })

@@ -2,6 +2,8 @@ import urllib3
 from django.conf import settings
 from kubernetes import client
 from kubernetes.client.rest import ApiException
+import json
+import redis
 
 from core.exceptions import (
     DomainError,
@@ -24,6 +26,7 @@ APP_ID_LABEL = "platform.local/app-id"
 APP_NAME_LABEL = "app.kubernetes.io/name"
 APP_INSTANCE_LABEL = "app.kubernetes.io/instance"
 
+redis_client = redis.Redis.from_url(settings.CELERY_BROKER_URL)
 
 def get_clients(cluster):
     token = decrypt_secret(cluster.token_encrypted)
@@ -399,40 +402,47 @@ def list_pods_for_app(cluster, namespace_name, app_id):
 
 
 def get_app_live_status(app):
+    cache_key = f"app_live_status:{app.id}"
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception:
+        pass
+
     cluster = app.namespace.cluster
     namespace_name = app.namespace.name
-
     deployment = get_k8s_deployment(cluster, namespace_name, app.name)
 
     if deployment is None:
-        return {
-            "deployment_found": False,
-            "ready": False,
-            "desired_replicas": app.replicas,
-            "available_replicas": 0,
-            "pods": [],
+        result = {
+            "deployment_found": False, "ready": False,
+            "desired_replicas": app.replicas, "available_replicas": 0, "pods": [],
+        }
+    else:
+        pods = list_pods_for_app(cluster, namespace_name, app.id)
+        desired = app.replicas
+        if deployment.spec and deployment.spec.replicas is not None:
+            desired = deployment.spec.replicas
+
+        available = 0
+        if deployment.status and deployment.status.available_replicas is not None:
+            available = deployment.status.available_replicas
+
+        if desired == 0:
+            ready = True
+        else:
+            all_pods_ready = bool(pods) and all(pod["ready"] for pod in pods)
+            ready = available >= desired and all_pods_ready
+
+        result = {
+            "deployment_found": True, "ready": ready,
+            "desired_replicas": desired, "available_replicas": available, "pods": pods,
         }
 
-    pods = list_pods_for_app(cluster, namespace_name, app.id)
+    try:
+        redis_client.setex(cache_key, 60, json.dumps(result))
+    except Exception:
+        pass
 
-    desired = app.replicas
-    if deployment.spec and deployment.spec.replicas is not None:
-        desired = deployment.spec.replicas
-
-    available = 0
-    if deployment.status and deployment.status.available_replicas is not None:
-        available = deployment.status.available_replicas
-
-    if desired == 0:
-        ready = True
-    else:
-        all_pods_ready = bool(pods) and all(pod["ready"] for pod in pods)
-        ready = available >= desired and all_pods_ready
-
-    return {
-        "deployment_found": True,
-        "ready": ready,
-        "desired_replicas": desired,
-        "available_replicas": available,
-        "pods": pods,
-    }
+    return result
