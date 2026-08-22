@@ -91,7 +91,7 @@ def create_app(validated_data):
         App.objects.filter(
             id=app.id,
             state=AppState.CREATING,
-        ).delete()
+        ).update(state=AppState.CREATE_FAILED)
         raise
 
     app.state = AppState.ACTIVE
@@ -134,7 +134,7 @@ def update_app(app_id, data):
                 .get(id=app_id)
             )
 
-            if app.state in [AppState.CREATING, AppState.DELETING]:
+            if app.state in [AppState.CREATING, AppState.DELETING, AppState.UPDATING]:
                 raise ConflictError(
                     "App cannot be updated in current state.",
                     {
@@ -142,7 +142,7 @@ def update_app(app_id, data):
                         "state": app.state,
                     },
                 )
-
+                
             for field in ["image", "replicas", "cpu", "memory"]:
                 if field in data:
                     setattr(app, field, data[field])
@@ -190,10 +190,13 @@ def delete_app(app_id):
         with transaction.atomic():
             app = App.objects.select_for_update().get(id=app_id)
 
-            if app.state == AppState.DELETING:
+            if app.state in [AppState.DELETING, AppState.CREATING, AppState.UPDATING]:
                 raise ConflictError(
-                    "App is already being deleted.",
-                    {"app_id": app_id},
+                    "App cannot be deleted in current state.",
+                    {
+                        "app_id": app_id,
+                        "state": app.state,
+                    },
                 )
 
             app.state = AppState.DELETING

@@ -42,7 +42,7 @@ def create_namespace(cluster_id, name):
         Namespace.objects.filter(
             id=namespace.id,
             state=NamespaceState.CREATING,
-        ).delete()
+        ).update(state=NamespaceState.CREATE_FAILED)
         raise
 
     namespace.state = NamespaceState.ACTIVE
