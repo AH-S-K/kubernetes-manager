@@ -1,3 +1,4 @@
+import logging
 import uuid
 import redis
 
@@ -7,7 +8,8 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.exceptions import ValidationError
+from core.models import App, Backup, BackupSchedule
+from core.exceptions import ValidationError, NotFoundError
 from core.serializers import (
     AppCreateSerializer,
     AppUpdateSerializer,
@@ -21,6 +23,7 @@ from core.services import clusters as cluster_service
 from core.services import namespaces as namespace_service
 from core.tasks import execute_backup
 
+logger = logging.getLogger(__name__)
 
 class ClusterListCreateView(APIView):
     def get(self, request):
@@ -153,8 +156,11 @@ class ReadyHealthView(APIView):
 
 redis_client = redis.Redis.from_url(settings.CELERY_BROKER_URL)
 
+
 class BackupView(APIView):
     def post(self, request):
+        logger.info(f"[DEBUG] BackupView.post called with data: {request.data}")
+        
         app_id = request.data.get("app_id")
         source_path = request.data.get("source_path")
         schedule = request.data.get("schedule")
@@ -172,7 +178,14 @@ class BackupView(APIView):
             backup_id=backup_id, app=app,
             source_path=source_path, status="pending"
         )
-        execute_backup.delay(backup_id)
+        
+        logger.info(f"[DEBUG] About to call execute_backup.delay({backup_id})")
+        try:
+            result = execute_backup.delay(backup_id)
+            logger.info(f"[DEBUG] execute_backup.delay returned task_id: {result.id}")
+        except Exception as e:
+            logger.error(f"[DEBUG] execute_backup.delay failed: {e}")
+            raise
 
         if schedule:
             parts = schedule.split()
@@ -186,14 +199,8 @@ class BackupView(APIView):
             )
 
         return Response({"backup_id": backup_id, "status": "pending"}, status=status.HTTP_202_ACCEPTED)
-
-    def get(self, request):
-        app_id = request.query_params.get("app_id")
-        if not app_id:
-            raise ValidationError("app_id query parameter is required.")
-        backups = Backup.objects.filter(app_id=app_id).order_by("-created_at")
-        return Response([{"backup_id": b.backup_id, "status": b.status} for b in backups])
-
+    
+    
 class BackupDetailView(APIView):
     def get(self, request, backup_id):
         try:
