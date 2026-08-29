@@ -7,7 +7,7 @@ from .validators import (
     validate_k8s_name,
     validate_memory,
 )
-
+from .services.crypto import decrypt_secret
 
 class ClusterCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=128)
@@ -25,15 +25,16 @@ class ClusterCreateSerializer(serializers.Serializer):
 
 
 class ClusterReadSerializer(serializers.ModelSerializer):
+    namespace_count = serializers.IntegerField(read_only=True)
+    state = serializers.SerializerMethodField()
+
     class Meta:
         model = Cluster
-        fields = [
-            "id",
-            "name",
-            "address",
-            "created_at",
-        ]
+        fields = ["id", "name", "address", "state", "namespace_count", "created_at"]
 
+    def get_state(self, obj):
+        return "ACTIVE" if decrypt_secret(obj.token_encrypted) else "UNREACHABLE"
+    
 
 class NamespaceCreateSerializer(serializers.Serializer):
     cluster_id = serializers.IntegerField()
@@ -45,17 +46,11 @@ class NamespaceCreateSerializer(serializers.Serializer):
 
 class NamespaceReadSerializer(serializers.ModelSerializer):
     cluster_id = serializers.IntegerField(source="cluster.id", read_only=True)
+    app_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Namespace
-        fields = [
-            "id",
-            "cluster_id",
-            "name",
-            "state",
-            "created_at",
-            "updated_at",
-        ]
+        fields = ["id", "cluster_id", "name", "state", "app_count", "created_at", "updated_at"]
 
 
 class AppCreateSerializer(serializers.Serializer):

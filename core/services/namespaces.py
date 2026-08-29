@@ -1,4 +1,5 @@
 from django.db import IntegrityError, transaction
+from django.db.models import Count
 from django.utils import timezone
 
 from core.exceptions import ConflictError, NotFoundError
@@ -58,7 +59,7 @@ def list_namespaces(cluster_id):
             {"cluster_id": cluster_id},
         )
 
-    return Namespace.objects.filter(cluster_id=cluster_id).order_by("id")
+    return Namespace.objects.filter(cluster_id=cluster_id).annotate(app_count=Count('apps')).order_by("id")
 
 
 def delete_namespace(namespace_id):

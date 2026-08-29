@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Count
 
 from core.models import Cluster
 from .crypto import encrypt_secret
@@ -19,4 +20,4 @@ def create_cluster(validated_data):
 
 
 def list_clusters():
-    return Cluster.objects.all().order_by("id")
+    return Cluster.objects.annotate(namespace_count=Count('namespaces')).order_by("id")
