@@ -220,3 +220,6 @@ __marimo__/
 
 # backup files
 backups/
+
+# k8s manifest
+k8s/
