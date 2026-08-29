@@ -121,18 +121,15 @@ def execute_backup(backup_id):
         )
 
     except Exception as e:
-        logger.warning(f"K8s exec failed: {e}")
-        with tarfile.open(local_file, mode="w:gz") as tar:
-            data = f"Mock backup for {backup.source_path}\n".encode()
-            info = tarfile.TarInfo(name="mock.txt")
-            info.size = len(data)
-            tar.addfile(info, io.BytesIO(data))
+        logger.error(f"K8s exec failed: {e}")
+        backup.status = BackupStatus.FAILED
+        backup.save(update_fields=["status", "updated_at"])
+        return
 
     backup.file_path = str(local_file)
     backup.status = BackupStatus.COMPLETED
     backup.save(update_fields=["status", "file_path", "updated_at"])
     logger.info(f"[DEBUG] Backup {backup_id} completed")
-
 
 @shared_task
 def check_backup_schedules():

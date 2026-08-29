@@ -167,7 +167,11 @@ class BackupView(APIView):
 
         if not app_id or not source_path:
             raise ValidationError("app_id and source_path are required.")
-
+        
+        # Path traversal protection
+        if ".." in source_path or not source_path.startswith("/"):
+            raise ValidationError("Invalid source_path. Must be absolute path without '..'")
+        
         try:
             app = App.objects.get(id=app_id)
         except App.DoesNotExist:
