@@ -1,9 +1,10 @@
+import logging
 import urllib3
+import json
+import redis
 from django.conf import settings
 from kubernetes import client
 from kubernetes.client.rest import ApiException
-import json
-import redis
 
 from core.exceptions import (
     DomainError,
@@ -14,6 +15,8 @@ from core.exceptions import (
     ValidationError,
 )
 from .crypto import decrypt_secret
+
+logger = logging.getLogger(__name__)
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -27,6 +30,7 @@ APP_NAME_LABEL = "app.kubernetes.io/name"
 APP_INSTANCE_LABEL = "app.kubernetes.io/instance"
 
 redis_client = redis.Redis.from_url(settings.CELERY_BROKER_URL)
+
 
 def get_clients(cluster):
     token = decrypt_secret(cluster.token_encrypted)
@@ -90,7 +94,43 @@ def _raise_api_exception(e, details=None):
     raise K8sUnavailableError("Cannot communicate with Kubernetes.", details)
 
 
-# Namespace operations
+def _bind_exec_role_to_namespace(cluster, namespace_name):
+    core_v1, _ = get_clients(cluster)
+    rbac_v1 = client.RbacAuthorizationV1Api(core_v1.api_client)
+
+    role_binding = {
+        "apiVersion": "rbac.authorization.k8s.io/v1",
+        "kind": "RoleBinding",
+        "metadata": {
+            "name": "django-sa-exec-binding",
+            "namespace": namespace_name,
+        },
+        "subjects": [
+            {
+                "kind": "ServiceAccount",
+                "name": "django-sa",
+                "namespace": "django-manager",
+            }
+        ],
+        "roleRef": {
+            "kind": "ClusterRole",
+            "name": "django-app-exec-role",
+            "apiGroup": "rbac.authorization.k8s.io",
+        },
+    }
+
+    try:
+        rbac_v1.create_namespaced_role_binding(
+            namespace=namespace_name,
+            body=role_binding,
+            _request_timeout=settings.K8S_REQUEST_TIMEOUT,
+        )
+    except ApiException as e:
+        if e.status != 409:
+            _raise_api_exception(e, {"namespace": namespace_name})
+    except Exception as e:
+        _raise_api_exception(e, {"namespace": namespace_name})
+
 
 def create_k8s_namespace(cluster, name, namespace_id):
     core_v1, _ = get_clients(cluster)
@@ -117,6 +157,7 @@ def create_k8s_namespace(cluster, name, namespace_id):
             body=body,
             _request_timeout=settings.K8S_REQUEST_TIMEOUT,
         )
+        _bind_exec_role_to_namespace(cluster, name)
     except ApiException as e:
         _raise_api_exception(e, details)
     except Exception as e:
@@ -130,6 +171,20 @@ def delete_k8s_namespace(cluster, name):
         "cluster_id": cluster.id,
         "namespace": name,
     }
+
+    try:
+        rbac_v1 = client.RbacAuthorizationV1Api(core_v1.api_client)
+        rbac_v1.delete_namespaced_role_binding(
+            name="django-sa-exec-binding",
+            namespace=name,
+            body=client.V1DeleteOptions(),
+            _request_timeout=settings.K8S_REQUEST_TIMEOUT,
+        )
+    except ApiException as e:
+        if e.status != 404:
+            logger.warning(f"Failed to delete RoleBinding for namespace {name}: {e}")
+    except Exception as e:
+        logger.warning(f"Failed to delete RoleBinding for namespace {name}: {e}")
 
     try:
         core_v1.delete_namespace(
@@ -167,8 +222,6 @@ def namespace_exists(cluster, name):
     except Exception as e:
         _raise_api_exception(e, details)
 
-
-# Deployment operations
 
 def _app_labels(app):
     return {

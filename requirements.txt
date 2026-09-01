@@ -1,4 +1,4 @@
-Django==6.1
+Django==5.2.17
 djangorestframework==3.18.0
 kubernetes==36.0.3
 cryptography==50.0.0
@@ -7,3 +7,5 @@ redis==8.1.0
 psycopg2-binary==2.9.12
 gunicorn==26.2.0
 django-cors-headers==4.9.0
+django-prometheus==2.5.0
+whitenoise==6.12.0

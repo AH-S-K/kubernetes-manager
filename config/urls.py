@@ -20,6 +20,7 @@ from django.urls import path, include
 from core.views import LiveHealthView, ReadyHealthView
 
 urlpatterns = [
+    path("", include("django_prometheus.urls")),
     path("admin/", admin.site.urls),
     path("api/v1/", include("core.urls")),
     path("healthz/live/", LiveHealthView.as_view()),
