@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import tarfile
+import time
 import uuid
 from datetime import timedelta
 
@@ -14,16 +15,21 @@ from django.utils import timezone
 
 from core.models import Backup, BackupSchedule, BackupStatus
 from core.services import k8s
+from core.metrics import (
+    backup_jobs_total,
+    backup_duration_seconds,
+    backups_in_progress,
+)
 
 logger = logging.getLogger(__name__)
 BACKUP_DIR = settings.BASE_DIR / "backups"
 
 KUBECTL_PATH = os.environ.get("KUBECTL_PATH") or shutil.which("kubectl") or "kubectl"
-EXEC_TIMEOUT = 60  # Secends
+EXEC_TIMEOUT = 60  # Seconds
 
 
 def _backup_via_kubectl(cluster, namespace_name, pod_name, source_path, local_file):
-    """فایل را از پاد با kubectl exec می‌خواند و به صورت tar.gz واقعی ذخیره می‌کند."""
+    """Reads the file from the pod using kubectl exec and stores it as a real tar.gz archive."""
     if not os.path.exists(KUBECTL_PATH):
         raise RuntimeError(f"kubectl not found at: {KUBECTL_PATH}")
 
@@ -97,6 +103,10 @@ def execute_backup(backup_id):
     backup.status = BackupStatus.RUNNING
     backup.save(update_fields=["status", "updated_at"])
 
+    # 1. Increment the number of backups currently in progress and record the exact start time
+    backups_in_progress.inc()
+    start_time = time.perf_counter()
+
     app = backup.app
     local_dir = BACKUP_DIR / str(app.id) / timezone.now().strftime("%Y-%m-%d")
     local_dir.mkdir(parents=True, exist_ok=True)
@@ -120,16 +130,28 @@ def execute_backup(backup_id):
             backup.source_path, local_file,
         )
 
+        backup.file_path = str(local_file)
+        backup.status = BackupStatus.COMPLETED
+        backup.save(update_fields=["status", "file_path", "updated_at"])
+        logger.info(f"[DEBUG] Backup {backup_id} completed")
+
+        # 2. Record the successful completion in the final outcome status
+        backup_jobs_total.labels(outcome='completed').inc()
+
     except Exception as e:
         logger.error(f"K8s exec failed: {e}")
         backup.status = BackupStatus.FAILED
         backup.save(update_fields=["status", "updated_at"])
-        return
 
-    backup.file_path = str(local_file)
-    backup.status = BackupStatus.COMPLETED
-    backup.save(update_fields=["status", "file_path", "updated_at"])
-    logger.info(f"[DEBUG] Backup {backup_id} completed")
+        # 3. Record the failure in the final outcome status
+        backup_jobs_total.labels(outcome='failed').inc()
+        return
+    finally:
+        # 4. Decrement the number of running backups and record the task execution duration
+        backups_in_progress.dec()
+        duration = time.perf_counter() - start_time
+        backup_duration_seconds.observe(duration)
+
 
 @shared_task
 def check_backup_schedules():
@@ -164,9 +186,12 @@ def check_backup_schedules():
 @shared_task
 def cleanup_stale_backups():
     cutoff = timezone.now() - timedelta(hours=24)
+    # Django query optimization: the update method directly returns the number of modified records
     count = Backup.objects.filter(
         status__in=[BackupStatus.PENDING, BackupStatus.RUNNING],
         created_at__lt=cutoff,
     ).update(status=BackupStatus.FAILED)
+    
     if count:
+        backup_jobs_total.labels(outcome='failed').inc(count)
         logger.info(f"Marked {count} stale backups as failed.")

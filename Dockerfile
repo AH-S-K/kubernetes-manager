@@ -7,8 +7,6 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
     curl \
-    gcc \
-    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN KUBECTL_VERSION="v1.36.3" && \
@@ -27,4 +25,4 @@ COPY . .
 
 RUN DJANGO_SECRET_KEY=build-dummy-key python manage.py collectstatic --noinput
 
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "60"]
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "1", "--worker-class", "gthread", "--threads", "2", "--timeout", "60", "--max-requests", "1000", "--max-requests-jitter", "50", "--keep-alive", "5"]
