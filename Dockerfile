@@ -25,4 +25,18 @@ COPY . .
 
 RUN DJANGO_SECRET_KEY=build-dummy-key python manage.py collectstatic --noinput
 
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "1", "--worker-class", "gthread", "--threads", "2", "--timeout", "60", "--max-requests", "1000", "--max-requests-jitter", "50", "--keep-alive", "5"]
+CMD [ \
+    "gunicorn", "config.wsgi:application", \
+    "--bind", "0.0.0.0:8000", \
+    "--workers", "3", \
+    "--worker-class", "gthread", \
+    "--threads", "4", \
+    "--timeout", "60", \
+    "--graceful-timeout", "30", \
+    "--keep-alive", "5", \
+    "--max-requests", "1000", \
+    "--max-requests-jitter", "50", \
+    "--forwarded-allow-ips", "*", \
+    "--access-logfile", "-", \
+    "--error-logfile", "-" \
+]
