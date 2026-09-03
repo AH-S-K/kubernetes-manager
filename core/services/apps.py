@@ -1,5 +1,8 @@
+import redis
+
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+from django.conf import settings
 
 from core.exceptions import ConflictError, NotFoundError
 from core.models import App, AppState, Namespace, NamespaceState
@@ -28,6 +31,8 @@ def app_basic_dict(app):
         "cpu": app.cpu,
         "memory": app.memory,
         "state": app.state,
+        "created_at": app.created_at.isoformat() if app.created_at else None,
+        "updated_at": app.updated_at.isoformat() if app.updated_at else None,
     }
 
 
@@ -125,6 +130,9 @@ def get_app_detail(app_id):
     return app_detail_dict(app, live)
 
 
+redis_client = redis.Redis.from_url(settings.CELERY_BROKER_URL)
+
+
 def update_app(app_id, data):
     try:
         with transaction.atomic():
@@ -182,8 +190,12 @@ def update_app(app_id, data):
         app.state = AppState.ACTIVE
         app.save(update_fields=["state", "updated_at"])
 
-    return app
+    try:
+        redis_client.delete(f"app_live_status:{app_id}")
+    except Exception:
+        pass
 
+    return app
 
 def delete_app(app_id):
     try:
@@ -225,3 +237,8 @@ def delete_app(app_id):
             id=app_id,
             state=AppState.DELETING,
         ).delete()
+
+    try:
+        redis_client.delete(f"app_live_status:{app_id}")
+    except Exception:
+        pass

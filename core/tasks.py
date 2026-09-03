@@ -20,6 +20,7 @@ from core.metrics import (
     backup_duration_seconds,
     backups_in_progress,
 )
+from core.management.commands.reconcile import Command
 
 logger = logging.getLogger(__name__)
 BACKUP_DIR = settings.BASE_DIR / "backups"
@@ -195,3 +196,9 @@ def cleanup_stale_backups():
     if count:
         backup_jobs_total.labels(outcome='failed').inc(count)
         logger.info(f"Marked {count} stale backups as failed.")
+        
+@shared_task
+def run_reconcile_cycle():
+    """Executes one cycle of the DB/K8s reconciler."""
+    cmd = Command()
+    cmd.reconcile()        

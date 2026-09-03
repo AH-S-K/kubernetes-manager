@@ -195,4 +195,9 @@ CELERY_BEAT_SCHEDULE = {
         "task": "core.tasks.cleanup_stale_backups",
         "schedule": 3600.0,
     },
+    "k8s-reconcile-loop": {
+        "task": "core.tasks.run_reconcile_cycle",
+        "schedule": 30.0,
+    },
+
 }
