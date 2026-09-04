@@ -4,7 +4,7 @@ import redis
 
 from django.db import connection
 from django.conf import settings
-from rest_framework import status
+from rest_framework import request, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -92,6 +92,16 @@ class AppListCreateView(APIView):
             namespace_id = int(namespace_id)
         except (TypeError, ValueError):
             raise ValidationError("namespace_id must be an integer.")
+
+        cluster_id = request.query_params.get("cluster_id")
+        if cluster_id is not None:
+            try:
+                cluster_id = int(cluster_id)
+                from core.models import Namespace
+                if not Namespace.objects.filter(id=namespace_id, cluster_id=cluster_id).exists():
+                    raise ValidationError("Namespace does not belong to the specified cluster.")
+            except (TypeError, ValueError):
+                raise ValidationError("cluster_id must be an integer.")
 
         with track_k8s_operation(resource='app', operation='list'):
             result = app_service.list_apps(namespace_id)

@@ -40,10 +40,7 @@ def create_namespace(cluster_id, name):
             namespace_id=namespace.id,
         )
     except Exception:
-        Namespace.objects.filter(
-            id=namespace.id,
-            state=NamespaceState.CREATING,
-        ).update(state=NamespaceState.CREATE_FAILED)
+        namespace.delete()
         raise
 
     namespace.state = NamespaceState.ACTIVE
@@ -98,9 +95,3 @@ def delete_namespace(namespace_id):
             updated_at=timezone.now(),
         )
         raise
-
-    with transaction.atomic():
-        Namespace.objects.filter(
-            id=namespace_id,
-            state=NamespaceState.DELETING,
-        ).delete()

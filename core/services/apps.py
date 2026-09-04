@@ -93,10 +93,8 @@ def create_app(validated_data):
             app=app,
         )
     except Exception:
-        App.objects.filter(
-            id=app.id,
-            state=AppState.CREATING,
-        ).update(state=AppState.CREATE_FAILED)
+        # Clean up the incomplete record so the user can immediately retry with the same name
+        app.delete()
         raise
 
     app.state = AppState.ACTIVE
@@ -147,32 +145,24 @@ def update_app(app_id, data):
             if app.state in [AppState.CREATING, AppState.DELETING, AppState.UPDATING]:
                 raise ConflictError(
                     "App cannot be updated in current state.",
-                    {
-                        "app_id": app_id,
-                        "state": app.state,
-                    },
+                    {"app_id": app_id, "state": app.state},
                 )
-                
+
+            old_values = {
+                "image": app.image,
+                "replicas": app.replicas,
+                "cpu": app.cpu,
+                "memory": app.memory,
+            }
+
             for field in ["image", "replicas", "cpu", "memory"]:
                 if field in data:
                     setattr(app, field, data[field])
 
             app.state = AppState.UPDATING
-            app.save(
-                update_fields=[
-                    "image",
-                    "replicas",
-                    "cpu",
-                    "memory",
-                    "state",
-                    "updated_at",
-                ]
-            )
+            app.save(update_fields=["image", "replicas", "cpu", "memory", "state", "updated_at"])
     except App.DoesNotExist:
-        raise NotFoundError(
-            "App not found.",
-            {"app_id": app_id},
-        )
+        raise NotFoundError("App not found.", {"app_id": app_id})
 
     try:
         k8s.patch_k8s_deployment(
@@ -181,8 +171,13 @@ def update_app(app_id, data):
             app=app,
         )
     except Exception:
+        # در صورت شکست کوبرنتیز، مقادیر دیتابیس دقیقاً به حالت قبل بازگردانده می‌شوند
         App.objects.filter(id=app_id).update(
             state=AppState.UPDATE_FAILED,
+            image=old_values["image"],
+            replicas=old_values["replicas"],
+            cpu=old_values["cpu"],
+            memory=old_values["memory"],
             updated_at=timezone.now(),
         )
         raise

@@ -1,11 +1,15 @@
+from genericpath import exists
 import time
 
+from celery import app
 from django.core.management.base import BaseCommand
 
 from core.exceptions import DomainError
 from core.models import App, AppState, Namespace, NamespaceState
 from core.services import k8s
 
+from datetime import timedelta
+from django.utils import timezone
 
 class Command(BaseCommand):
     help = "Reconcile DB state with Kubernetes state."
@@ -52,15 +56,17 @@ class Command(BaseCommand):
                 continue
 
             try:
-                if namespace.state in [
-                    NamespaceState.CREATING,
-                    NamespaceState.CREATE_FAILED,
-                ]:
+                if namespace.state == NamespaceState.CREATING:
                     if exists:
                         namespace.state = NamespaceState.ACTIVE
                         namespace.save(update_fields=["state", "updated_at"])
-                    else:
+                    elif (timezone.now() - namespace.created_at) > timedelta(minutes=3):
                         namespace.delete()
+
+                elif namespace.state == NamespaceState.CREATE_FAILED:
+                    if exists:
+                        namespace.state = NamespaceState.ACTIVE
+                        namespace.save(update_fields=["state", "updated_at"])
 
                 elif namespace.state in [
                     NamespaceState.DELETING,
@@ -105,16 +111,18 @@ class Command(BaseCommand):
                 continue
 
             try:
-                if app.state in [
-                    AppState.CREATING,
-                    AppState.CREATE_FAILED,
-                ]:
+                if app.state == AppState.CREATING:
                     if exists:
                         app.state = AppState.ACTIVE
                         app.save(update_fields=["state", "updated_at"])
-                    else:
+                    elif (timezone.now() - app.created_at) > timedelta(minutes=3):
                         app.delete()
 
+                elif app.state == AppState.CREATE_FAILED:
+                    if exists:
+                        app.state = AppState.ACTIVE
+                        app.save(update_fields=["state", "updated_at"])
+                        
                 elif app.state in [
                     AppState.UPDATING,
                     AppState.UPDATE_FAILED,

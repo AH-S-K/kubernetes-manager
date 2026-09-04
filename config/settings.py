@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 from pathlib import Path
 import os
 
+from django import core
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -197,6 +199,10 @@ CELERY_BEAT_SCHEDULE = {
     },
     "k8s-reconcile-loop": {
         "task": "core.tasks.run_reconcile_cycle",
+        "schedule": 30.0,
+    },
+    "ping-clusters-loop": {
+        "task": "core.tasks.ping_all_clusters",
         "schedule": 30.0,
     },
 

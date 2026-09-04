@@ -7,13 +7,14 @@ import tarfile
 import time
 import uuid
 from datetime import timedelta
+import redis
 
 from celery import shared_task
 from celery.schedules import crontab
 from django.conf import settings
 from django.utils import timezone
 
-from core.models import Backup, BackupSchedule, BackupStatus
+from core.models import Backup, BackupSchedule, BackupStatus, Cluster
 from core.services import k8s
 from core.metrics import (
     backup_jobs_total,
@@ -22,6 +23,8 @@ from core.metrics import (
 )
 from core.management.commands.reconcile import Command
 
+
+r = redis.Redis.from_url(settings.CELERY_BROKER_URL)
 logger = logging.getLogger(__name__)
 BACKUP_DIR = settings.BASE_DIR / "backups"
 
@@ -202,3 +205,15 @@ def run_reconcile_cycle():
     """Executes one cycle of the DB/K8s reconciler."""
     cmd = Command()
     cmd.reconcile()        
+    
+    
+@shared_task
+def ping_all_clusters():
+    for cluster in Cluster.objects.all():
+        cache_key = f"cluster_reachable:{cluster.id}"
+        try:
+            core_v1, _ = k8s.get_clients(cluster)
+            core_v1.get_api_resources(_request_timeout=3)
+            r.setex(cache_key, 60, "1")
+        except Exception:
+            r.setex(cache_key, 60, "0")

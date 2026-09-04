@@ -3,15 +3,19 @@ import re
 from rest_framework import serializers
 
 NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
-CPU_RE = re.compile(r"^(?:[0-9]+m|[0-9]+(?:\.[0-9]+)?)$")
-MEMORY_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$")
+CPU_RE = re.compile(r"^(?:[1-9][0-9]*m|[0-9]*\.[1-9][0-9]*|[1-9][0-9]*(?:\.[0-9]+)?)$")
+MEMORY_RE = re.compile(r"^(?:[1-9][0-9]*(?:Ki|Mi|Gi|Ti)|[1-9][0-9]*(?:\.[0-9]+)?(?:K|M|G|T)?)$")
 ADDRESS_RE = re.compile(r"^[a-zA-Z0-9.-]+:\d+$")
 
+PROTECTED_NAMESPACES = {"kube-system", "kube-public", "kube-node-lease", "default", "django-k8s-manager", "django-manager", "monitoring-system"}
 
 def validate_k8s_name(value):
     value = value.strip()
     if not value:
         raise serializers.ValidationError("Name is required.")
+
+    if value.lower() in PROTECTED_NAMESPACES:
+        raise serializers.ValidationError(f"'{value}' is a reserved system namespace and cannot be managed.")
 
     if len(value) > 63:
         raise serializers.ValidationError("Name must be at most 63 characters.")

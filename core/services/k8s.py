@@ -53,9 +53,20 @@ def get_clients(cluster):
         "authorization": f"Bearer {token}"
     }
 
-    # برای اجرای تمرین روی k3s لوکال/remote ساده‌تر است که TLS verify نشود.
-    cfg.verify_ssl = False
-    cfg.assert_hostname = False
+    if cluster.ca_cert and cluster.ca_cert.strip():
+        import os
+        ca_path = f"/tmp/cluster_ca_{cluster.id}.crt"
+
+        if not os.path.exists(ca_path) or os.path.getsize(ca_path) == 0:
+            with open(ca_path, "w") as f:
+                f.write(cluster.ca_cert)
+        cfg.ssl_ca_cert = ca_path
+        cfg.verify_ssl = True
+        cfg.assert_hostname = False
+    else:
+        cfg.verify_ssl = False
+        cfg.assert_hostname = False
+
 
     api_client = client.ApiClient(cfg)
 

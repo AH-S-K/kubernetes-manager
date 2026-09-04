@@ -33,9 +33,17 @@ class ClusterReadSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "address", "state", "namespace_count", "created_at"]
 
     def get_state(self, obj):
-        return "ACTIVE" if decrypt_secret(obj.token_encrypted) else "UNREACHABLE"
-    
-
+            import redis
+            from django.conf import settings
+            try:
+                r = redis.Redis.from_url(settings.CELERY_BROKER_URL)
+                cached = r.get(f"cluster_reachable:{obj.id}")
+                if cached is not None:
+                    return "ACTIVE" if cached == b"1" else "UNREACHABLE"
+            except Exception:
+                pass
+            return "ACTIVE" if decrypt_secret(obj.token_encrypted) else "UNREACHABLE"
+        
 class NamespaceCreateSerializer(serializers.Serializer):
     cluster_id = serializers.IntegerField()
     name = serializers.CharField(max_length=63)
