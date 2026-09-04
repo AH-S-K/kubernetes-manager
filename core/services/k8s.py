@@ -440,8 +440,12 @@ def list_pods_for_app(cluster, namespace_name, app_id):
 
     for pod in pod_list.items:
         name = pod.metadata.name if pod.metadata else "unknown"
-        phase = pod.status.phase if pod.status else "Unknown"
-        ready = _pod_is_ready(pod)
+        if pod.metadata and pod.metadata.deletion_timestamp:
+            phase = "Terminating"
+            ready = False
+        else:
+            phase = pod.status.phase if pod.status else "Unknown"
+            ready = _pod_is_ready(pod)
 
         result.append(
             {
@@ -483,10 +487,10 @@ def get_app_live_status(app):
             available = deployment.status.available_replicas
 
         if desired == 0:
-            ready = True
+            ready = len(pods) == 0
         else:
             all_pods_ready = bool(pods) and all(pod["ready"] for pod in pods)
-            ready = available >= desired and all_pods_ready
+            ready = available == desired and len(pods) == desired and all_pods_ready
 
         result = {
             "deployment_found": True, "ready": ready,
