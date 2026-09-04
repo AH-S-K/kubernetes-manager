@@ -120,7 +120,9 @@ def list_apps(namespace_id):
     for app in apps:
         live = k8s.get_app_live_status(app)
         result.append(app_detail_dict(app, live))
-
+        if app.state == AppState.DELETING and not live.get("deployment_found") and len(live.get("pods", [])) == 0:
+            app.delete()
+            continue
     return result
 
 
@@ -231,12 +233,6 @@ def delete_app(app_id):
             updated_at=timezone.now(),
         )
         raise
-
-    with transaction.atomic():
-        App.objects.filter(
-            id=app_id,
-            state=AppState.DELETING,
-        ).delete()
 
     try:
         redis_client.delete(f"app_live_status:{app_id}")

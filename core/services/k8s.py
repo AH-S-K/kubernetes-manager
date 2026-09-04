@@ -414,9 +414,8 @@ def _pod_is_ready(pod):
     return False
 
 
-def list_pods_for_app(cluster, namespace_name, app_id):
+def list_pods_for_app(cluster, namespace_name: str, app_id: str) -> list[dict]:
     core_v1, _ = get_clients(cluster)
-
     label_selector = f"{APP_INSTANCE_LABEL}={app_id}"
 
     details = {
@@ -431,27 +430,47 @@ def list_pods_for_app(cluster, namespace_name, app_id):
             label_selector=label_selector,
             _request_timeout=settings.K8S_REQUEST_TIMEOUT,
         )
-    except ApiException as e:
-        _raise_api_exception(e, details)
-    except Exception as e:
+    except (ApiException, Exception) as e:
         _raise_api_exception(e, details)
 
     result = []
-
     for pod in pod_list.items:
-        name = pod.metadata.name if pod.metadata else "unknown"
-        if pod.metadata and pod.metadata.deletion_timestamp:
+        metadata = pod.metadata
+        status = pod.status
+        spec = pod.spec
+
+        # Determine pod phase and readiness
+        if metadata and metadata.deletion_timestamp:
             phase = "Terminating"
             ready = False
         else:
-            phase = pod.status.phase if pod.status else "Unknown"
+            phase = status.phase if status else "Unknown"
             ready = _pod_is_ready(pod)
+
+        # Calculate total container restarts
+        container_statuses = status.container_statuses if status else None
+        restarts = (
+            sum(cs.restart_count for cs in container_statuses)
+            if container_statuses
+            else 0
+        )
+
+        # Format creation timestamp safely
+        created_at = (
+            metadata.creation_timestamp.isoformat()
+            if metadata and metadata.creation_timestamp
+            else None
+        )
 
         result.append(
             {
-                "name": name,
+                "name": metadata.name if metadata else "unknown",
                 "phase": phase,
                 "ready": ready,
+                "restarts": restarts,
+                "pod_ip": status.pod_ip if status else None,
+                "node_name": spec.node_name if spec else None,
+                "created_at": created_at,
             }
         )
 
