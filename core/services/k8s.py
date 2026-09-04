@@ -494,7 +494,7 @@ def get_app_live_status(app):
         }
 
     try:
-        redis_client.setex(cache_key, 60, json.dumps(result))
+        redis_client.setex(cache_key, 5, json.dumps(result))
     except Exception:
         pass
 
