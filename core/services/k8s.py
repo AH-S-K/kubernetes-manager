@@ -414,8 +414,24 @@ def _pod_is_ready(pod):
     return False
 
 
-def list_pods_for_app(cluster, namespace_name: str, app_id: str) -> list[dict]:
+def _get_pod_status(pod):
+    if pod.metadata and pod.metadata.deletion_timestamp:
+        return "Terminating"
+
+    if pod.status and pod.status.container_statuses:
+        for cs in pod.status.container_statuses:
+            if cs.state:
+                if cs.state.waiting and cs.state.waiting.reason:
+                    return cs.state.waiting.reason
+                if cs.state.terminated and cs.state.terminated.exit_code != 0:
+                    return cs.state.terminated.reason or "Error"
+
+    return pod.status.phase if (pod.status and pod.status.phase) else "Unknown"
+
+
+def list_pods_for_app(cluster, namespace_name, app_id):
     core_v1, _ = get_clients(cluster)
+
     label_selector = f"{APP_INSTANCE_LABEL}={app_id}"
 
     details = {
@@ -430,47 +446,27 @@ def list_pods_for_app(cluster, namespace_name: str, app_id: str) -> list[dict]:
             label_selector=label_selector,
             _request_timeout=settings.K8S_REQUEST_TIMEOUT,
         )
-    except (ApiException, Exception) as e:
+    except ApiException as e:
+        _raise_api_exception(e, details)
+    except Exception as e:
         _raise_api_exception(e, details)
 
     result = []
+
     for pod in pod_list.items:
-        metadata = pod.metadata
-        status = pod.status
-        spec = pod.spec
-
-        # Determine pod phase and readiness
-        if metadata and metadata.deletion_timestamp:
-            phase = "Terminating"
-            ready = False
-        else:
-            phase = status.phase if status else "Unknown"
-            ready = _pod_is_ready(pod)
-
-        # Calculate total container restarts
-        container_statuses = status.container_statuses if status else None
-        restarts = (
-            sum(cs.restart_count for cs in container_statuses)
-            if container_statuses
-            else 0
-        )
-
-        # Format creation timestamp safely
-        created_at = (
-            metadata.creation_timestamp.isoformat()
-            if metadata and metadata.creation_timestamp
-            else None
-        )
+        name = pod.metadata.name if pod.metadata else "unknown"
+        phase = _get_pod_status(pod)
+        ready = _pod_is_ready(pod) if phase != "Terminating" else False
 
         result.append(
             {
-                "name": metadata.name if metadata else "unknown",
+                "name": name,
                 "phase": phase,
                 "ready": ready,
-                "restarts": restarts,
-                "pod_ip": status.pod_ip if status else None,
-                "node_name": spec.node_name if spec else None,
-                "created_at": created_at,
+                "restarts": sum(cs.restart_count for cs in pod.status.container_statuses) if pod.status and pod.status.container_statuses else 0,
+                "pod_ip": pod.status.pod_ip if pod.status else None,
+                "node_name": pod.spec.node_name if pod.spec else None,
+                "created_at": pod.metadata.creation_timestamp.isoformat() if pod.metadata and pod.metadata.creation_timestamp else None,
             }
         )
 
